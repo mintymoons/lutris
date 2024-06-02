@@ -31,7 +31,6 @@ __all__ = [
     "yuzu",
     "cemu",
     # Sony
-    "duckstation",
     "pcsx2",
     "rpcs3",
     "vita3k",
