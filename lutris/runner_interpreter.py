@@ -8,7 +8,6 @@ from lutris.util import cache_single, system
 from lutris.util.graphics.gpu import GPUS
 from lutris.util.linux import LINUX_SYSTEM
 from lutris.util.log import logger
-from lutris.util.wine import proton
 
 
 def get_mangohud_conf(system_config):
@@ -24,20 +23,6 @@ def get_launch_parameters(runner, gameplay_info):
     system_config = runner.system_config
     launch_arguments = gameplay_info["command"]
     env = {}
-
-    # Steam compatibility
-    if os.environ.get("SteamAppId"):
-        logger.info("Game launched from steam (AppId: %s)", os.environ["SteamAppId"])
-        env["LC_ALL"] = ""
-
-    # Set correct LC_ALL depending on user settings
-    locale = system_config.get("locale")
-    if locale:
-        env["LC_ALL"] = locale
-    if runner.name == "wine":
-        wine_version = runner.runner_config.get("version")
-        if wine_version and locale and proton.is_proton_path(wine_version):
-            env["HOST_LC_ALL"] = locale
 
     # MangoHud
     if runner.name == "steam":

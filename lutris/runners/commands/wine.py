@@ -4,7 +4,6 @@
 import os
 import shlex
 import time
-from gettext import gettext as _
 
 from lutris import runtime, settings
 from lutris.monitored_command import MonitoredCommand
@@ -26,7 +25,7 @@ from lutris.util.wine.wine import (
     is_prefix_directory,
 )
 
-GE_PROTON_LATEST = _("GE-Proton (Latest)")
+GE_PROTON_LATEST = proton.GE_PROTON_LATEST
 
 
 def set_regedit(
@@ -125,15 +124,6 @@ def create_prefix(
         wine_path = runner.get_executable()
     logger.info("Winepath: %s", wine_path)
 
-    if not proton.is_proton_path(wine_path):
-        wineboot_path = os.path.join(os.path.dirname(wine_path), "wineboot")
-        if not system.path_exists(wineboot_path):
-            logger.error(
-                "No wineboot executable found in %s, " "your wine installation is most likely broken",
-                wine_path,
-            )
-            return
-
     wineenv = {
         "WINEARCH": arch,
         "WINEPREFIX": prefix,
@@ -149,15 +139,24 @@ def create_prefix(
         wineenv["WINE_SKIP_MONO_INSTALLATION"] = "1"
         overrides["mscoree"] = "disabled"
 
-    if not proton.is_proton_path(wine_path):
-        system.execute([wineboot_path], env=wineenv)
-    else:
-        wineenv["GAMEID"] = proton.DEFAULT_GAMEID
-        wineenv["UMU_LOG"] = "debug"
-        wineenv["WINEARCH"] = "win64"
-        wineenv["PROTONPATH"] = proton.get_proton_path_from_bin(wine_path)
+    if proton.is_proton_path(wine_path):
+        # All proton path prefixes are created via Umu; if you aren't using
+        # the default Umu, we'll use PROTONPATH to indicate what Proton is
+        # to be used.
+        proton.update_proton_env(wine_path, wineenv, umu_log="debug")
+
         command = MonitoredCommand([proton.get_umu_path(), "createprefix"], env=wineenv)
         command.start()
+    else:
+        wineboot_path = os.path.join(os.path.dirname(wine_path), "wineboot")
+        if not system.path_exists(wineboot_path):
+            logger.error(
+                "No wineboot executable found in %s, " "your wine installation is most likely broken",
+                wine_path,
+            )
+            return
+
+        system.execute([wineboot_path], env=wineenv)
 
     for loop_index in range(1000):
         time.sleep(0.5)
@@ -184,7 +183,7 @@ def winekill(prefix, arch=WINE_DEFAULT_ARCH, wine_path=None, env=None, initial_p
     steam_data_dir = os.path.expanduser("~/.local/share/Steam/compatibilitytools.d")
     if not env:
         env = {"WINEARCH": arch, "WINEPREFIX": prefix}
-    if wine_path == GE_PROTON_LATEST and os.path.exists(f"{steam_data_dir}/UMU-Latest"):
+    if proton.is_umu_path(wine_path) and os.path.exists(f"{steam_data_dir}/UMU-Latest"):
         proton_version = os.path.realpath(f"{steam_data_dir}/UMU-Latest")
         command = [os.path.join(proton_version, "files", "bin", "wineserver"), "-k"]
         env["GAMEID"] = proton.DEFAULT_GAMEID
@@ -299,13 +298,6 @@ def wineexec(
     if _args:
         args = '{} "{}"'.format(_args[0], _args[1])
 
-    # Create prefix if necessary
-    if arch not in ("win32", "win64"):
-        arch = detect_arch(prefix, wine_path)
-    if not is_prefix_directory(prefix):
-        wine_bin = winetricks_wine if winetricks_wine else wine_path
-        create_prefix(prefix, wine_path=wine_bin, arch=arch, runner=runner)
-
     wineenv = {"WINEARCH": arch}
     if winetricks_wine:
         wineenv["WINE"] = winetricks_wine
@@ -314,6 +306,16 @@ def wineexec(
 
     if prefix:
         wineenv["WINEPREFIX"] = prefix
+
+    if proton.is_proton_path(wine_path):
+        proton.update_proton_env(wine_path, wineenv)
+
+    # Create prefix if necessary
+    if arch not in ("win32", "win64"):
+        arch = detect_arch(prefix, wine_path)
+    if not is_prefix_directory(prefix):
+        wine_bin = winetricks_wine if winetricks_wine else wine_path
+        create_prefix(prefix, wine_path=wine_bin, arch=arch, runner=runner)
 
     wine_system_config = config.system_config if config else runner.system_config
     disable_runtime = disable_runtime or wine_system_config["disable_runtime"]
@@ -333,20 +335,6 @@ def wineexec(
 
     if overrides:
         wineenv["WINEDLLOVERRIDES"] = get_overrides_env(overrides)
-
-    # TODO: Move this to somewhere that a reference to the game object
-    if proton.is_proton_path(wine_path):
-        game = None
-        wineenv["GAMEID"] = proton.get_game_id(game)
-
-        if wine_path == GE_PROTON_LATEST:
-            wine_path = proton.get_umu_path()
-        else:
-            wineenv["PROTONPATH"] = proton.get_proton_path_from_bin(wine_path)
-        locale = env.get("LC_ALL")
-        host_locale = env.get("HOST_LC_ALL")
-        if locale and not host_locale:
-            wineenv["HOST_LC_ALL"] = locale
 
     baseenv = runner.get_env(disable_runtime=disable_runtime)
     baseenv.update(wineenv)

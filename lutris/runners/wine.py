@@ -738,8 +738,14 @@ class wine(Runner):
         if version is None:
             version = self.read_version_from_config()
         if version == proton.GE_PROTON_LATEST:
-            return version
-        wine_path = self.get_path_for_version(version)
+            return proton.get_umu_path()
+
+        try:
+            wine_path = self.get_path_for_version(version)
+        except MissingExecutableError:
+            if not fallback:
+                raise
+
         if system.path_exists(wine_path):
             return wine_path
 
@@ -1119,22 +1125,16 @@ class wine(Runner):
 
         env["WINEDLLOVERRIDES"] = get_overrides_env(self.dll_overrides)
 
-        if proton.is_proton_path(wine_config_version):
-            # In stable versions of proton this can be dist/bin instead of files/bin
-            if "files/bin" in wine_exe:
-                env["PROTONPATH"] = wine_exe[: wine_exe.index("files/bin")]
-            else:
-                try:
-                    env["PROTONPATH"] = wine_exe[: wine_exe.index("dist/bin")]
-                except ValueError:
-                    pass
-
-            locale = env.get("LC_ALL")
-            host_locale = env.get("HOST_LC_ALL")
-            if locale and not host_locale:
-                env["HOST_LC_ALL"] = locale
-
         return env
+
+    def finish_env(self, env: Dict[str, str], game) -> None:
+        super().finish_env(env, game)
+
+        wine_exe = self.get_executable()
+
+        if proton.is_proton_path(wine_exe):
+            game_id = proton.get_game_id(game, env)
+            proton.update_proton_env(wine_exe, env, game_id=game_id)
 
     def get_runtime_env(self):
         """Return runtime environment variables with path to wine for Lutris builds"""
@@ -1184,15 +1184,6 @@ class wine(Runner):
                 wine_prefix.restore_desktop_integration()
         except Exception as ex:
             logger.exception("Failed to setup desktop integration, the prefix may not be valid: %s", ex)
-
-    def get_command(self):
-        exe = self.get_executable()
-        if proton.is_proton_path(exe):
-            umu_path = proton.get_umu_path()
-            if umu_path:
-                return [umu_path]
-            raise MissingExecutableError("Install umu to use Proton")
-        return super().get_command()
 
     def play(self):  # pylint: disable=too-many-return-statements # noqa: C901
         game_exe = self.game_exe
